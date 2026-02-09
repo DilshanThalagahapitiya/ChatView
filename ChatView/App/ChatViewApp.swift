@@ -8,8 +8,21 @@
 import SwiftUI
 import SwiftData
 
+import FirebaseCore
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+        print("Firebase Configured")
+        return true
+    }
+}
+
 @main
 struct ChatViewApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,
@@ -25,8 +38,11 @@ struct ChatViewApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            NavigationRoot {
+                ChatListView()
+            }
         }
         .modelContainer(sharedModelContainer)
     }
+
 }
