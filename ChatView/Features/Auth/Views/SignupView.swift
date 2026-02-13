@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct SignupView: View {
-    @EnvironmentObject private var authVM: AuthViewModel
+    @EnvironmentObject private var authVM: AuthVM
     @EnvironmentObject private var coordinator: NavigationCoordinator
     
     @State private var name = ""
@@ -230,6 +230,10 @@ struct SignupView: View {
                     .padding(.bottom, 40)
                 }
             }
+            
+            if authVM.isLoading {
+                LoadingOverlay(message: "Creating account...")
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .onSubmit {
@@ -255,6 +259,6 @@ struct SignupView: View {
 
 #Preview {
     SignupView()
-        .environmentObject(AuthViewModel())
+        .environmentObject(AuthVM())
         .environmentObject(NavigationCoordinator())
 }

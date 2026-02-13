@@ -20,6 +20,9 @@ protocol AuthService {
     
     /// Fetch user profile from database
     func fetchUserProfile(uid: String) async throws -> User
+    
+    /// Update user presence status
+    func updatePresence(isOnline: Bool) async throws
 }
 
 /// Authentication errors

@@ -3,7 +3,7 @@ import SwiftUI
 /// Root navigation container that handles all navigation routing
 struct NavigationRoot<Content: View>: View {
     @StateObject private var coordinator = NavigationCoordinator()
-    @StateObject private var authVM = AuthViewModel()
+    @EnvironmentObject private var authVM: AuthVM
     let content: Content
     
     init(@ViewBuilder content: () -> Content) {
@@ -12,7 +12,10 @@ struct NavigationRoot<Content: View>: View {
     
     var body: some View {
         Group {
-            if authVM.isAuthenticated {
+            if authVM.isCheckingSession || authVM.isLoading {
+                // Initial session check or manual login: Show premium splash
+                SplashView()
+            } else if authVM.isAuthenticated {
                 // Authenticated: Show main app
                 NavigationStack(path: $coordinator.path) {
                     content
@@ -48,7 +51,7 @@ struct NavigationRoot<Content: View>: View {
         case .signup:
             SignupView()
         case .chatDetail(let chat, let currentUser):
-            ChatDetailView(vm: ChatViewModel(chat: chat, currentUser: currentUser))
+            ChatDetailView(chat: chat, currentUser: currentUser)
         }
     }
 }

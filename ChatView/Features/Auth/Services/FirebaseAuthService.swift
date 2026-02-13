@@ -24,6 +24,7 @@ class FirebaseAuthService: AuthService {
             
             if let firebaseUser = firebaseUser {
                 // Fetch user profile from database
+                print("🔄 Firebase User detected: \(firebaseUser.uid). Fetching profile...")
                 Task {
                     do {
                         let user = try await self.fetchUserProfile(uid: firebaseUser.uid)
@@ -31,12 +32,18 @@ class FirebaseAuthService: AuthService {
                             self.authStateSubject.send(user)
                         }
                     } catch {
-                        // If profile doesn't exist yet (e.g., during signup), don't clear auth state
-                        print("Note: User profile not yet available for \(firebaseUser.uid): \(error)")
-                        // The signup flow will update the auth state manually after saving the profile
+                        print("⚠️ Error fetching user profile for \(firebaseUser.uid): \(error)")
+                        // Even if profile fetch fails, we should still signal an update 
+                        // so AuthVM can move past 'isCheckingSession'.
+                        // We send a basic user object if profile is missing for now.
+                        await MainActor.run {
+                            let placeholderUser = User(id: firebaseUser.uid, name: firebaseUser.displayName ?? "User", email: firebaseUser.email)
+                            self.authStateSubject.send(placeholderUser)
+                        }
                     }
                 }
             } else {
+                print("ℹ️ No Firebase User detected.")
                 self.authStateSubject.send(nil)
             }
         }
@@ -132,10 +139,51 @@ class FirebaseAuthService: AuthService {
         var updates: [String: Any] = ["isOnline": isOnline]
         
         if !isOnline {
-            updates["lastSeen"] = Date().timeIntervalSince1970
+            updates["lastSeen"] = ServerValue.timestamp()
         }
         
         try await database.child("users").child(uid).updateChildValues(updates)
+    }
+    
+    func updatePresence(isOnline: Bool) async throws {
+        guard let uid = auth.currentUser?.uid else { return }
+        
+        let userStatusRef = database.child("users").child(uid)
+        let connectedRef = database.child(".info/connected")
+        
+        if isOnline {
+            // Monitor connection state
+            connectedRef.observe(.value) { snapshot in
+                guard let connected = snapshot.value as? Bool, connected else { return }
+                
+                // When connected, set up onDisconnect once
+                let statusDict: [String: Any] = [
+                    "isOnline": true,
+                    "lastSeen": ServerValue.timestamp()
+                ]
+                
+                let offlineDict: [String: Any] = [
+                    "isOnline": false,
+                    "lastSeen": ServerValue.timestamp()
+                ]
+                
+                // 1. Set onDisconnect handler
+                userStatusRef.onDisconnectUpdateChildValues(offlineDict)
+                
+                // 2. Mark as online now
+                userStatusRef.updateChildValues(statusDict)
+            }
+        } else {
+            // Manually set to offline (e.g. background)
+            // Remove observers to prevent auto-online if we explicitly want to be offline
+            connectedRef.removeAllObservers()
+            
+            let offlineDict: [String: Any] = [
+                "isOnline": false,
+                "lastSeen": ServerValue.timestamp()
+            ]
+            try await userStatusRef.updateChildValues(offlineDict)
+        }
     }
     
     private func parseUser(from data: [String: Any], uid: String) throws -> User {
@@ -148,13 +196,23 @@ class FirebaseAuthService: AuthService {
         let lastSeenTimestamp = data["lastSeen"] as? TimeInterval
         let createdAtTimestamp = data["createdAt"] as? TimeInterval
         
+        func parseDate(_ ts: TimeInterval?) -> Date? {
+            guard let ts = ts else { return nil }
+            // Handle precision: Firebase ServerValue.timestamp() is in milliseconds.
+            // If > 10^12, it's likely milliseconds.
+            if ts > 1_000_000_000_000 {
+                return Date(timeIntervalSince1970: ts / 1000)
+            }
+            return Date(timeIntervalSince1970: ts)
+        }
+        
         return User(
             id: uid,
             name: name,
             email: email,
             isOnline: isOnline,
-            lastSeen: lastSeenTimestamp.map { Date(timeIntervalSince1970: $0) },
-            createdAt: createdAtTimestamp.map { Date(timeIntervalSince1970: $0) }
+            lastSeen: parseDate(lastSeenTimestamp),
+            createdAt: parseDate(createdAtTimestamp)
         )
     }
     

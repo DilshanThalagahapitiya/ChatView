@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct LoginView: View {
-    @EnvironmentObject private var authVM: AuthViewModel
+    @EnvironmentObject private var authVM: AuthVM
     @EnvironmentObject private var coordinator: NavigationCoordinator
     
     @State private var email = ""
@@ -158,7 +158,10 @@ struct LoginView: View {
                 .padding(.horizontal, 32)
                 
                 Spacer()
-                Spacer()
+            }
+            
+            if authVM.isLoading {
+                LoadingOverlay(message: "Logging in...")
             }
         }
         .onSubmit {
@@ -178,6 +181,6 @@ struct LoginView: View {
 
 #Preview {
     LoginView()
-        .environmentObject(AuthViewModel())
+        .environmentObject(AuthVM())
         .environmentObject(NavigationCoordinator())
 }
