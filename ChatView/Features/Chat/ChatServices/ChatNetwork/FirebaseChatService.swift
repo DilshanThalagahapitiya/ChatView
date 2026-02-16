@@ -140,11 +140,18 @@ class FirebaseChatService: ChatService {
     
     //Listen To Messages.
     func listenToMessages(for chatID: String) -> AnyPublisher<[Message], Error> {
-//        print("📡 FirebaseChatService: Starting listener for chat: \(chatID)")
-        let subject = CurrentValueSubject<[Message]?, Error>(nil)
-        
-        let handle = database.child("messages").child(chatID).queryOrdered(byChild: "timestamp").observe(.value) { snapshot in
-//            print("📩 FirebaseChatService: Received snapshot for \(chatID) (\(snapshot.childrenCount) messages)")
+        let currentUserID: String
+        do {
+            currentUserID = try getCurrentUserID()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+
+        let messagesSubject = CurrentValueSubject<[Message], Error>([])
+        let deletedIdsSubject = CurrentValueSubject<Set<String>, Error>([])
+
+        // 1. Listen to messages
+        let messagesHandle = database.child("messages").child(chatID).queryOrdered(byChild: "timestamp").observe(.value) { snapshot in
             var messages: [Message] = []
             for child in snapshot.children.allObjects as? [DataSnapshot] ?? [] {
                 if let dict = child.value as? [String: Any],
@@ -152,18 +159,31 @@ class FirebaseChatService: ChatService {
                     messages.append(message)
                 }
             }
-//            print("🚀 FirebaseChatService: Sending \(messages.count) parsed messages to subject")
-            subject.send(messages)
+            messagesSubject.send(messages)
         } withCancel: { error in
-//            print("❌ FirebaseChatService: Listener cancelled for \(chatID): \(error.localizedDescription)")
-            subject.send(completion: .failure(error))
+            messagesSubject.send(completion: .failure(error))
         }
-        
-        return subject
-            .compactMap { $0 }
+
+        // 2. Listen to deleted message IDs for current user
+        let deletedHandle = database.child("chats").child(chatID).child("deletedMessages").child(currentUserID).observe(.value) { snapshot in
+            var deletedIds = Set<String>()
+            for child in snapshot.children {
+                if let snap = child as? DataSnapshot {
+                    deletedIds.insert(snap.key)
+                }
+            }
+            deletedIdsSubject.send(deletedIds)
+        } withCancel: { error in
+            deletedIdsSubject.send(completion: .failure(error))
+        }
+
+        return Publishers.CombineLatest(messagesSubject, deletedIdsSubject)
+            .map { messages, deletedIds in
+                messages.filter { !deletedIds.contains($0.id) }
+            }
             .handleEvents(receiveCancel: {
-//                print("🛑 FirebaseChatService: Listener removed for \(chatID)")
-                self.database.child("messages").child(chatID).removeObserver(withHandle: handle)
+                self.database.child("messages").child(chatID).removeObserver(withHandle: messagesHandle)
+                self.database.child("chats").child(chatID).child("deletedMessages").child(currentUserID).removeObserver(withHandle: deletedHandle)
             })
             .eraseToAnyPublisher()
     }
@@ -470,6 +490,102 @@ class FirebaseChatService: ChatService {
                 ref.removeObserver(withHandle: handle)
             })
             .eraseToAnyPublisher()
+    }
+    //MARK: - Update Last Message
+    private func updateLastMessageIfNeeded(chatID: String) async throws {
+        // 1. Fetch the most recent message
+        let snapshot = try await getSnapshot(database.child("messages").child(chatID).queryLimited(toLast: 1))
+        
+        var lastMsgDict: [String: Any]? = nil
+        if let child = snapshot.children.allObjects.first as? DataSnapshot,
+           let dict = child.value as? [String: Any] {
+            lastMsgDict = dict
+        }
+        
+        // 2. Update the chat node's lastMessage
+        try await database.child("chats").child(chatID).updateChildValues([
+            "lastMessage": lastMsgDict as Any,
+            "updatedAt": ServerValue.timestamp()
+        ])
+    }
+    
+    //Delete Message.
+    func deleteMessage(messageID: String, chatID: String) async throws {
+        try await database.child("messages").child(chatID).child(messageID).removeValue()
+        try await updateLastMessageIfNeeded(chatID: chatID)
+    }
+    
+    //Edit Message.
+    func editMessage(messageID: String, chatID: String, newContent: MessageType) async throws {
+        // 1. First, fetch the current message to get all its fields
+        let messageSnapshot = try await getSnapshot(database.child("messages").child(chatID).child(messageID))
+        guard var messageDict = messageSnapshot.value as? [String: Any] else {
+            throw NSError(domain: "ChatService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Message not found"])
+        }
+        
+        // 2. Check if this message is the last message in the chat
+        let chatSnapshot = try await getSnapshot(database.child("chats").child(chatID))
+        var isLastMessage = false
+        
+        if let chatDict = chatSnapshot.value as? [String: Any],
+           let lastMsgDict = chatDict["lastMessage"] as? [String: Any] {
+            // Compare by checking if the senderId and timestamp match
+            // (since the message ID might not be stored in lastMessage)
+            let lastMsgSenderId = lastMsgDict["senderId"] as? String
+            let lastMsgTimestamp = lastMsgDict["timestamp"] as? Double
+            let currentMsgSenderId = messageDict["senderId"] as? String
+            let currentMsgTimestamp = messageDict["timestamp"] as? Double
+            
+            if lastMsgSenderId == currentMsgSenderId && lastMsgTimestamp == currentMsgTimestamp {
+                isLastMessage = true
+            }
+        }
+        
+        // 3. Prepare update dictionary
+        var updateDict: [String: Any] = [:]
+        
+        switch newContent {
+        case .text(let text):
+            updateDict["type"] = "text"
+            updateDict["text"] = text
+            // Remove url field if it exists (switching from media to text)
+            messageDict.removeValue(forKey: "url")
+        case .image(let media):
+            updateDict["type"] = "image"
+            updateDict["url"] = media.url.absoluteString
+            // Remove text field if it exists (switching from text to media)
+            messageDict.removeValue(forKey: "text")
+        case .video(let media):
+            updateDict["type"] = "video"
+            updateDict["url"] = media.url.absoluteString
+            // Remove text field if it exists (switching from text to media)
+            messageDict.removeValue(forKey: "text")
+        }
+        
+        // 4. Update the message in the messages node
+        try await database.child("messages").child(chatID).child(messageID).updateChildValues(updateDict)
+        
+        // 5. If this was the last message, directly update the chat's lastMessage
+        if isLastMessage {
+            // Merge the updates into the message dict
+            for (key, value) in updateDict {
+                messageDict[key] = value
+            }
+            
+            try await database.child("chats").child(chatID).updateChildValues([
+                "lastMessage": messageDict,
+                "updatedAt": ServerValue.timestamp()
+            ])
+        } else {
+            // Otherwise, fetch and update as before
+            try await updateLastMessageIfNeeded(chatID: chatID)
+        }
+    }
+
+    //Delete Message For Me.
+    func deleteMessageForMe(messageID: String, chatID: String) async throws {
+        let currentUserID = try getCurrentUserID()
+        try await database.child("chats").child(chatID).child("deletedMessages").child(currentUserID).child(messageID).setValue(true)
     }
 }
 

@@ -11,6 +11,8 @@ struct MessageBubbleView: View {
     let message: Message
     let isCurrentUser: Bool
     let senderName: String?
+    var onEdit: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -73,6 +75,23 @@ struct MessageBubbleView: View {
                     .font(.caption2)
                     .foregroundColor(.gray)
             }//VStack
+            .contextMenu {
+                if isCurrentUser {
+                    if case .text = message.content {
+                        Button {
+                            onEdit?()
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                    }
+                }
+                
+                Button(role: .destructive) {
+                    onDelete?()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
             
             if isCurrentUser {
                 // Status indicator

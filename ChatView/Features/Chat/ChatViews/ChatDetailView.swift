@@ -26,7 +26,13 @@ struct ChatDetailView: View {
                                 MessageBubbleView(
                                     message: message,
                                     isCurrentUser: message.senderId == vm.currentUser.id,
-                                    senderName: vm.chat.participants.first(where: { $0.id == message.senderId })?.name
+                                    senderName: vm.chat.participants.first(where: { $0.id == message.senderId })?.name,
+                                    onEdit: {
+                                        vm.startEditing(message)
+                                    },
+                                    onDelete: {
+                                        vm.deleteMessage(message)
+                                    }
                                 )
                                 .id(message.id)
                             }//ForEach

@@ -33,6 +33,36 @@ struct ChatInputView: View {
                 .background(Color.gray.opacity(0.9))
             }
             
+            // Editing Indicator
+            if let editingMsg = vm.editingMessage {
+                HStack {
+                    Image(systemName: "pencil")
+                        .foregroundColor(.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Editing Message")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                        if case .text(let content) = editingMsg.content {
+                            Text(content)
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    Spacer()
+                    Button(action: {
+                        vm.cancelEditing()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color.blue.opacity(0.1))
+            }
+            
             HStack(alignment: .bottom, spacing: 12) {
                 // Media Picker Button
                 PhotosPicker(selection: $selectedItem, matching: .any(of: [.images, .videos])) {

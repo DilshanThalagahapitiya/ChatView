@@ -49,4 +49,22 @@ protocol ChatService {
     /// Delete a chat conversation.
     /// - Parameter chatID: The ID of the chat to delete.
     func deleteChat(_ chatID: String) async throws
+    
+    /// Delete a specific message.
+    /// - Parameters:
+    ///   - messageID: The ID of the message to delete.
+    ///   - chatID: The ID of the chat containing the message.
+    func deleteMessage(messageID: String, chatID: String) async throws
+    
+    /// Edit a specific message.
+    /// - Parameters:
+    ///   - messageID: The ID of the message to edit.
+    ///   - chatID: The ID of the chat containing the message.
+    ///   - newContent: The new content of the message.
+    func editMessage(messageID: String, chatID: String, newContent: MessageType) async throws
+    /// Delete a specific message for the current user only.
+    /// - Parameters:
+    ///   - messageID: The ID of the message to delete.
+    ///   - chatID: The ID of the chat containing the message.
+    func deleteMessageForMe(messageID: String, chatID: String) async throws
 }

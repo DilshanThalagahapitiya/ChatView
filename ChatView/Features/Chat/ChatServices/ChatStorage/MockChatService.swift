@@ -103,4 +103,32 @@ class MockChatService: ChatService {
         chats.removeAll(where: { $0.id == chatID })
         chatSubject.send(chats)
     }
+    
+    func deleteMessage(messageID: String, chatID: String) async throws {
+        if let chatIndex = chats.firstIndex(where: { $0.id == chatID }) {
+            chats[chatIndex].messages.removeAll(where: { $0.id == messageID })
+            chatSubject.send(chats)
+        }
+    }
+    
+    func editMessage(messageID: String, chatID: String, newContent: MessageType) async throws {
+        if let chatIndex = chats.firstIndex(where: { $0.id == chatID }),
+           let msgIndex = chats[chatIndex].messages.firstIndex(where: { $0.id == messageID }) {
+            chats[chatIndex].messages[msgIndex] = Message(
+                id: messageID,
+                senderId: chats[chatIndex].messages[msgIndex].senderId,
+                content: newContent,
+                timestamp: chats[chatIndex].messages[msgIndex].timestamp,
+                status: .sent
+            )
+            chatSubject.send(chats)
+        }
+    }
+
+    func deleteMessageForMe(messageID: String, chatID: String) async throws {
+        if let chatIndex = chats.firstIndex(where: { $0.id == chatID }) {
+            chats[chatIndex].messages.removeAll(where: { $0.id == messageID })
+            chatSubject.send(chats)
+        }
+    }
 }

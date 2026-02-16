@@ -18,6 +18,7 @@ class ChatViewModel {
     var isLoading = false
     var errorMessage: String?
     var isTyping = false
+    var editingMessage: Message?
 
     // The current chat session being managed.
     var chat: Chat
@@ -110,24 +111,38 @@ class ChatViewModel {
         newMessageText = ""
         selectedMedia = []
         
-        // 1. Send Text Message
+        // 1. Send or Edit Text Message
         if !textToSend.isEmpty {
-            var message = Message(senderId: currentUser.id, content: .text(textToSend), status: .sending)
-            messages.append(message)
-            
-            do {
-                var messageToSend = message
-                messageToSend.status = .sent
-                try await chatService.sendMessage(messageToSend, to: chat.id)
-                if let index = messages.firstIndex(where: { $0.id == message.id }) {
-                    messages[index].status = .sent
+            if let editingMsg = editingMessage {
+                // Editing existing message
+                do {
+                    try await chatService.editMessage(messageID: editingMsg.id, chatID: chat.id, newContent: .text(textToSend))
+                    if let index = messages.firstIndex(where: { $0.id == editingMsg.id }) {
+                        messages[index].status = .sent
+                        // Content will be updated via listener
+                    }
+                    editingMessage = nil
+                } catch {
+                    errorMessage = "Failed to edit message: \(error.localizedDescription)"
                 }
-            } catch {
-                errorMessage = "Failed to send text: \(error.localizedDescription)"
-                if let index = messages.firstIndex(where: { $0.id == message.id }) {
-                    messages[index].status = .failed
+            } else {
+                // Sending new message
+                var message = Message(senderId: currentUser.id, content: .text(textToSend), status: .sending)
+                messages.append(message)
+                
+                do {
+                    var messageToSend = message
+                    messageToSend.status = .sent
+                    try await chatService.sendMessage(messageToSend, to: chat.id)
+                    if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                        messages[index].status = .sent
+                    }
+                } catch {
+                    errorMessage = "Failed to send text: \(error.localizedDescription)"
+                    if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                        messages[index].status = .failed
+                    }
                 }
-                // restore text if failed? Usually not desired in chat apps, keep it in bubble as failed
             }
         }
         
@@ -176,5 +191,34 @@ class ChatViewModel {
                 print("Failed to mark chat as read: \(error)")
             }
         }
+    }
+    
+    //MARK: - Delete Message
+    func deleteMessage(_ message: Message) {
+        Task {
+            do {
+                if message.senderId == currentUser.id {
+                    // Global delete for sent messages
+                    try await chatService.deleteMessage(messageID: message.id, chatID: chat.id)
+                } else {
+                    // Local delete for received messages
+                    try await chatService.deleteMessageForMe(messageID: message.id, chatID: chat.id)
+                }
+            } catch {
+                errorMessage = "Failed to delete message: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    //MARK: - Editing Logic
+    func startEditing(_ message: Message) {
+        guard case .text(let content) = message.content else { return }
+        editingMessage = message
+        newMessageText = content
+    }
+    
+    func cancelEditing() {
+        editingMessage = nil
+        newMessageText = ""
     }
 }
